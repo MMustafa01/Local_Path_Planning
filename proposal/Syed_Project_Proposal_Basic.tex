@@ -1,0 +1,112 @@
+\documentclass[11pt]{article}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{fancyhdr}
+\usepackage[a4paper, margin=1in]{geometry}
+\usepackage{lastpage}
+% \usepackage{tab}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    pdftitle={Overleaf Example},
+    pdfpagemode=FullScreen,
+    }
+
+\urlstyle{same}
+
+
+
+
+\title{Paper Title\footnote{This is how you add a footnote}}
+
+\author{Syed Mustafa \\ Habib University\\ sm06554@st.habib.edu.pk}
+\begin{document}
+\pagestyle{fancy}
+
+\fancyhf{}
+\fancyfoot[C]{\color{gray}TAMU Summer Research Internship }
+\fancyfoot[R]{\color{gray} Page \thepage \hspace{1pt} of \pageref{LastPage}}
+\input{titlepage}
+
+\tableofcontents
+
+\newpage
+
+
+\section{Executive Summary} \label{Executive summary}
+The executive summary is a brief description of the project. The purpose is to give a quick overview of (1) the need, goal, and objectives, (2) the design and implementation, and (3) the expected results and benefits of the project. The intended audience of the executive summary is a program director, someone who makes decisions about which projects will receive funding. Since the executive summary is a summary, it should be written last.
+
+
+\section{Introduction}\label{Intro}
+
+\subsection{Assumptions}
+The following assumptions will be followed throughout the project:
+\begin{enumerate}
+    \item The scenario takes place in a 2D environment.
+    \item The planned global path is fixed and given initially.
+    \item The obstacles are fixed and given initially.
+    \item The autonomous vehicle is a 4-wheel vehicle, which can be regarded as a 4.5 x 1.8m rectangular.
+\end{enumerate}
+
+\subsection{Need Statement}\label{Need statement}
+A way to implement a lane-changing algorithm so that the autonomous vehicle can avoid objects on its path, i.e. the road.
+
+\subsection{Goals and objective}\label{Goal and objective}
+The goals and objectives are as follows:
+\begin{enumerate}
+    \item Compare existing methods of static path planning to: 
+    \begin{enumerate}
+        \item Conclude which algorithm performs the best in the given situation.
+        \item Analyze room for improvement in the current algorithms if any.
+    \end{enumerate}
+    \item Use a reliable path planning algorithm, i.e. if a solution\(s\) exists then the planner outputs at least one feasible solution.
+    \item Simulate the algorithms on various simulating platforms including but not limited to:
+    \begin{enumerate}
+        \item OpenAI Gym 
+        \item CARLA 
+        \item Pygames
+        \item Mathworks: Navigation Toolboc$^{TM}$
+    \end{enumerate}
+
+
+\end{enumerate}
+
+\subsection{Design and Feasibility}\label{Design and Feasibility}
+
+\section{Literature and Technical Survey}\label{Literature and Technical Survey}
+\section{Proposed Work}\label{Proposed Work}
+\subsection{Evaluation of alternative solutions} \label{Evaluation am}
+\subsection{Design specification} \label{Design specification}
+\subsection{Approach for design validation} \label{Approch for design validation}
+\section{Engineering Standards}\label{Engineering Standards}
+\section{References}
+\begin{thebibliography}{00}
+    \bibitem{b1} G. Eason, B. Noble, and I. N. Sneddon, ``On certain integrals of Lipschitz-Hankel type involving products of Bessel functions,'' Phil. Trans. Roy. Soc. London, vol. A247, pp. 529--551, April 1955.
+    \bibitem{b2} J. Clerk Maxwell, A Treatise on Electricity and Magnetism, 3rd ed., vol. 2. Oxford: Clarendon, 1892, pp.68--73.
+    \bibitem{b3} I. S. Jacobs and C. P. Bean, ``Fine particles, thin films, and exchange anisotropy,'' in Magnetism, vol. III, G. T. Rado and H. Suhl, Eds. New York: Academic, 1963, pp. 271--350.
+    \bibitem{b4} K. Elissa, ``Title of paper if known,'' unpublished.
+    \bibitem{b5} R. Nicole, ``Title of paper with only first word capitalized,'' J. Name Stand. Abbrev., in press.
+    \bibitem{b6} Y. Yorozu, M. Hirano, K. Oka, and Y. Tagawa, ``Electron spectroscopy studies on magneto-optical media and plastic substrate interface,'' IEEE Trans. J. Magn. Japan, vol. 2, pp. 740--741, August 1987 [Digests 9th Annual Conf. Magnetics Japan, p. 301, 1982].
+    \bibitem{b7} M. Young, The Technical Writer's Handbook. Mill Valley, CA: University Science, 1989.
+    \end{thebibliography}
+    
+
+
+\section{Apendix}
+
+
+
+
+\vspace{12pt}
+
+\end{document}

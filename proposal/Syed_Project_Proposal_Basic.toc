@@ -1,0 +1,14 @@
+\contentsline {section}{\numberline {1}Executive Summary}{2}{section.1}%
+\contentsline {section}{\numberline {2}Introduction}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Assumptions}{2}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Need Statement}{2}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Goals and objective}{2}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}Design and Feasibility}{3}{subsection.2.4}%
+\contentsline {section}{\numberline {3}Literature and Technical Survey}{3}{section.3}%
+\contentsline {section}{\numberline {4}Proposed Work}{3}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Evaluation of alternative solutions}{3}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Design specification}{3}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Approach for design validation}{3}{subsection.4.3}%
+\contentsline {section}{\numberline {5}Engineering Standards}{3}{section.5}%
+\contentsline {section}{\numberline {6}References}{3}{section.6}%
+\contentsline {section}{\numberline {7}Apendix}{3}{section.7}%
