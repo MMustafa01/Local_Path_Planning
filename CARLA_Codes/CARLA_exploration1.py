@@ -82,5 +82,13 @@ finally:
     print(world.get_actors().find(471))
     world.get_actors().find(471).destroy()
     
+
+    if cv2.waitkey(1) == ord('q')
     
+
+
+    ### Vey important piece of code
+    for bp in bp_lib.filter("vehicle"):
+        print(bp.id)
+
     '''
