@@ -31,11 +31,11 @@ TIMEOUT = 10.0
 SHOW_LOCAL_VIEW= True
 SECONDS_PER_EP = 100
 SAMPLING_RESOLUTION = 1
-
+PARAM = [6.3, 2.875] # [ld: look ahead distance, wheel based] 
 
 class CarENV(gym.Env):
     
-    def __init__(self, Vehicle_model = VEHICLE_MODEL, host = HOST, port = PORT,no_render_mode = NO_RENDER_MODE, time_out  = TIMEOUT, IMG_HEIGHT = IMG_HEIGHT , IMG_WIDTH =IMG_WIDTH, show_local_view = SHOW_LOCAL_VIEW, sampling_resolution = SAMPLING_RESOLUTION):
+    def __init__(self, Vehicle_model = VEHICLE_MODEL, host = HOST, port = PORT,no_render_mode = NO_RENDER_MODE, time_out  = TIMEOUT, IMG_HEIGHT = IMG_HEIGHT , IMG_WIDTH =IMG_WIDTH, show_local_view = SHOW_LOCAL_VIEW, sampling_resolution = SAMPLING_RESOLUTION, model = PARAM, seconds_per_ep = SECONDS_PER_EP):
         super().__init__()
         try: 
             print("Please wait as we attempt to connect to the CARLA server.")
@@ -56,8 +56,11 @@ class CarENV(gym.Env):
         self.SHOW_LOCAL_VIEW = show_local_view 
         self.camera_flag = None
         self.camera_observation = None
-        self.Global_Route_Planner = GlobalRoutePlanner(self.world.get_map(), sampling_resolution)
-    
+        self.sampling_resolution = sampling_resolution
+        self.Global_Route_Planner = GlobalRoutePlanner(self.world.get_map(), self.sampling_resolution)
+        self.model = {'ld': model[0],
+                      'wheel_base': model[1]}
+        self.seconds_per_episode = seconds_per_ep
 
         
         
@@ -83,14 +86,29 @@ class CarENV(gym.Env):
 
 
     def reset(self, seed=None, options=None, start_point = None, end_point = None):
-        
+        '''
+        Params:
+            start_point: The vehicle transform at the start of the route
+            end_point: The vehicle transform at the end of the route
+
+        self.info contains list for velocities and locations for each episode
+        '''
+
+        self.info = {'velocity': [],
+                     'location': []
+                    }
+
+
+
         self.collision = {'collision':False}  #check the collision sensor
         self.actor_lst = []
         if not start_point:        
             self.start_transform = np.random.choice(self.spawn_points)
-        self.vehicle = self.world.spawn_actor(self.vehicle_model, self.start_transform)
+        else:
+            self.start_transform = start_point    
+        self.vehicle = self.world.try_spawn_actor(self.vehicle_model, self.start_transform)
         if  self.vehicle == None:
-            print("Failed to ")
+            raise Exception("Failed to spawn the vehicle")
         self.actor_lst.append(self.vehicle)
 
         ###### Spawning a top view camera #######
@@ -133,8 +151,6 @@ class CarENV(gym.Env):
 
 
         '''Apparently this makes the spawning quicker'''
-
-        
         self.control = carla.VehicleControl()
         self.control.throttle = 0.0
         self.control.steer = 0.0
@@ -145,6 +161,10 @@ class CarENV(gym.Env):
             end_point = random.choice(self.spawn_points)
 
         self.route = self.Global_Route_Planner.trace_route(self.start_transform.location, end_point.location)
+        self.waypoint_lst = []
+        for waypoint, _ in self.route:
+            loc = waypoint.transform.location
+            self.waypoint_lst.append((loc.x,loc.y)) 
         
         ''' This is just to visualize the route
         Make this in
@@ -165,43 +185,91 @@ class CarENV(gym.Env):
         return self.camera_observation, None
 
 
+    def get_vehicle_coordinates(self):
+        vehicle_location = self.vehicle_transform.location
+        x = vehicle_location.x
+        y = vehicle_location.y
+        z = vehicle_location.z
+        return (x, y, z)
+    
+    def get_vehicle_velocity(self):        
+        vel_array = self.vehicle.get_velocity() 
+        x_dot, y_dot, z_dot = (vel_array.x, vel_array.y, vel_array.z)
+        velocity = np.hypot(x_dot, y_dot)
+        return
 
-
-
-    def step(self, action):
-        '''
-        The action state is A = {right, center, left}
-
-        What this means is that the 
-        '''
-        if action == 0:
-            # Navigation mark at right
-            pass
+    def get_target(self, action):
+        
+        x, y, z = self.get_vehicle_coordinates()
         if action == 1:
-            # Navigation mark at center
-            pass
-        if action == 2:
-            # Navigation mark at left
-            pass
+            # Go left
+            target = (x - self.sampling_resolution, y + self.sampling_resolution)
+        elif action == 2:
+            #  Go forward
+            target = (x , y + self.sampling_resolution)
+        elif action == 3:
+            # Go Right
+            target = (x , y + self.sampling_resolution)
 
+    
 
-        v = self.vehicle.get_velocity()
-        v_kmh = int(3.6 * math.sqrt(v.x**2 + v.y**2 + v.z**2))  
+    def get_steering(self, target, coordinates , yaw):
+            tx, ty = target
+            L = self.model['wheel_base']
+            ld = self.model['ld']
+            x, y, z = coordinates
+            alpha = math.atan2((ty - y), (tx-x)) - yaw
+            steering_angle = np.clip(math.atan2(2*L*math.sin(alpha),ld ),-1,1)
+            return steering_angle
 
+    def get_reward(self):
         if self.collision['collision'] == True:
             done = True
             reward  = -10
         else: 
             done = False
             reward = 1
-        if self.episode_start_time + SECONDS_PER_EP < time.time():
+        if self.episode_start_time + self.seconds_per_episode < time.time(): #This means that the time of the episode has expired
             done = True
             reward = 0
+        return reward, done
 
+
+    def step(self, action):
+        '''
+        self.vehicle_transform: is the vehicle transform at a given step
+        '''
+        self.vehicle_transform = self.vehicle.get_transform()
+        target = self.get_target(action)
+        self.velocity = self.get_vehicle_velocity()
+        v_kmh = int(3.6 * math.sqrt(self.velocity.x**2 + self.velocity.y**2 + self.velocity.z**2))  
+
+
+        coordinates = self.get_vehicle_coordinates()
+        
+        yaw = self.vehicle_transform.rotation.yaw
+        yaw = np.radians(yaw)  ### Converting in radians
+        steering_angle = self.get_steering(self, target, coordinates , yaw)
+        
+        ##### Now the control bit ####
+
+        self.control.steer = steering_angle
+        self.vehicle.apply_control(self.control)
+
+        ##### Might Add a PID controller here to control velocity
+
+        reward, done = self.get_reward()
+
+        self.info['velocity'].append(v_kmh)
+        self.info['location'].append(coordinates)
+        
+
+        
+        
 
         truncated = None
-        info = None
-        return self.camera_observation, reward, done, truncated, None
+
+        return self.camera_observation, reward, done, truncated, self.info
 
 
 
