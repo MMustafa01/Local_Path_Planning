@@ -1,4 +1,4 @@
-import gymnasium as gym
+import  gym
 import stable_baselines3
 import sys
 import math 
@@ -38,10 +38,10 @@ class CarENV(gym.Env):
     def __init__(self, Vehicle_model = VEHICLE_MODEL, host = HOST, port = PORT,no_render_mode = NO_RENDER_MODE, time_out  = TIMEOUT, IMG_HEIGHT = IMG_HEIGHT , IMG_WIDTH =IMG_WIDTH, show_local_view = SHOW_LOCAL_VIEW, sampling_resolution = SAMPLING_RESOLUTION, model = PARAM, seconds_per_ep = SECONDS_PER_EP):
         super().__init__()
         try: 
-            print("Please wait as we attempt to connect to the CARLA server.")
+            #print("Please wait as we attempt to connect to the CARLA server.")
             self.client = carla.Client(host, port)        
             self.client.set_timeout(time_out)
-            print("You have successfully connected to the CARLA server.")
+            #print("You have successfully connected to the CARLA server.")
         except:
             raise Exception("Sorry you were unable to connect to the CARLA server. Check if you have a CARLA server running.")
         self.world = self.client.get_world()
@@ -49,7 +49,7 @@ class CarENV(gym.Env):
         self.spawn_points = self.world.get_map().get_spawn_points() 
         self.vehicle_model = self.bp_lip.filter(Vehicle_model)[0]
         self.settings = self.world.get_settings()
-        self.settings.no_rendering_mode = False
+        self.settings.no_rendering_mode = no_render_mode
         self.world.apply_settings(self.settings)
         self.IMG_HEIGHT = IMG_HEIGHT
         self.IMG_WIDTH =IMG_WIDTH
@@ -62,13 +62,13 @@ class CarENV(gym.Env):
                       'wheel_base': model[1]}
         self.seconds_per_episode = seconds_per_ep
 
-        
+        self.episodes = 0
         
 
         self.action_space = Discrete(3) #Left, Up, right
         self.observation_space = Box(
-            low=0, high=255, shape=(IMG_HEIGHT, IMG_WIDTH, 3), dtype=np.uint8)
-
+            low=0, high=255, shape=[IMG_HEIGHT, IMG_WIDTH, 3], dtype=np.uint8)
+        # np.uint8
         '''
         Need to do:
             1. Complete the Reset method, i.e. 
@@ -93,12 +93,22 @@ class CarENV(gym.Env):
 
         self.info contains list for velocities and locations for each episode
         '''
+        
+        
+        try:
+            self.destroy_all_actors()
 
+
+        except:
+            #print("Actors already destroyed")
+            asad = 1
+        
         self.info = {'velocity': [],
                      'location': []
                     }
 
-
+        
+        self.episodes += 1
 
         self.collision = {'collision':False}  #check the collision sensor
         self.actor_lst = []
@@ -170,19 +180,22 @@ class CarENV(gym.Env):
         Make this in
         '''
         self.path_visualizor()
-
+        self.control.throttle = 0.25
+        
+        self.vehicle.apply_control(self.control)
 
         
 
-        print("The environmnet has been reset")
+        print(f"The environmnet has been reset and the episode is {self.episodes}")
         
         while self.camera_flag is None:
             time.sleep(0.01)
-            print('.',end='')
+            #print('.',end='')
 
         self.episode_start_time = time.time()
         info = None
-        return self.camera_observation, None
+        #print(type(np.array(self.camera_observation))) 
+        return self.camera_observation
 
 
     def get_vehicle_coordinates(self):
@@ -195,22 +208,23 @@ class CarENV(gym.Env):
     def get_vehicle_velocity(self):        
         vel_array = self.vehicle.get_velocity() 
         x_dot, y_dot, z_dot = (vel_array.x, vel_array.y, vel_array.z)
-        velocity = np.hypot(x_dot, y_dot)
-        return
+        velocity = int(3.6 * math.sqrt(x_dot**2 + y_dot**2 + z_dot**2))  
+        return velocity
 
     def get_target(self, action):
         
         x, y, z = self.get_vehicle_coordinates()
-        if action == 1:
+        # #print(action)
+        if action == 0:
             # Go left
             target = (x - self.sampling_resolution, y + self.sampling_resolution)
-        elif action == 2:
+        elif action == 1:
             #  Go forward
             target = (x , y + self.sampling_resolution)
-        elif action == 3:
+        elif action == 2:
             # Go Right
             target = (x , y + self.sampling_resolution)
-
+        return target
     
 
     def get_steering(self, target, coordinates , yaw):
@@ -226,12 +240,15 @@ class CarENV(gym.Env):
         if self.collision['collision'] == True:
             done = True
             reward  = -10
+
         else: 
             done = False
-            reward = 1
+            reward = 10
         if self.episode_start_time + self.seconds_per_episode < time.time(): #This means that the time of the episode has expired
             done = True
             reward = 0
+
+        # #print(f"the reward is = {reward}")
         return reward, done
 
 
@@ -242,14 +259,14 @@ class CarENV(gym.Env):
         self.vehicle_transform = self.vehicle.get_transform()
         target = self.get_target(action)
         self.velocity = self.get_vehicle_velocity()
-        v_kmh = int(3.6 * math.sqrt(self.velocity.x**2 + self.velocity.y**2 + self.velocity.z**2))  
+        v_kmh = self.velocity
 
 
         coordinates = self.get_vehicle_coordinates()
         
         yaw = self.vehicle_transform.rotation.yaw
         yaw = np.radians(yaw)  ### Converting in radians
-        steering_angle = self.get_steering(self, target, coordinates , yaw)
+        steering_angle = self.get_steering( target, coordinates , yaw)
         
         ##### Now the control bit ####
 
@@ -263,13 +280,11 @@ class CarENV(gym.Env):
         self.info['velocity'].append(v_kmh)
         self.info['location'].append(coordinates)
         
-
+        time.sleep(0.1)
         
-        
+      
 
-        truncated = None
-
-        return self.camera_observation, reward, done, truncated, self.info
+        return self.camera_observation, reward, done,  self.info
 
 
 
@@ -284,22 +299,22 @@ class CarENV(gym.Env):
 
     def collision_detector(self, event):
         self.collision['collision'] = True
-        print("A collision has occured")
+        #print("A collision has occured")
     
         
 
     def process_img(self, image):
         i = np.array(image.raw_data)
-        print("This is called")
         i2 = i.reshape((self.IMG_HEIGHT, self.IMG_WIDTH, 4))
         i3 = i2[:, :, :3]
         if self.SHOW_LOCAL_VIEW:
             cv2.imshow("", i3)
             cv2.waitKey(1)
         self.camera_observation = i3
+        # #print(np.shape(np.array(self.camera_observation)))
         if  self.camera_observation is None:
             self.camera_flag = False
-            print(f'This is to show that camera image hasn\'t loaded yet: {i3}')
+            #print(f'This is to show that camera image hasn\'t loaded yet: {i3}')
         else:
             self.camera_flag = True
     
@@ -308,9 +323,9 @@ class CarENV(gym.Env):
         for act in self.actor_lst:
             try: 
                 act.destroy()
-                print(f"Actor {act} has been destroyed")
+                #print(f"Actor {act} has been destroyed")
             except:
-                print(f'Actor {act} was not destroyed')
+                #print(f'Actor {act} was not destroyed')
                 pass
         
         
@@ -327,6 +342,6 @@ cv2.stop()
         
 if __name__ == '__main__':
     car =  CarENV()
-    print(car)
+    #print(car)
 
 
