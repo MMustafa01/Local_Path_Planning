@@ -32,10 +32,12 @@ SHOW_LOCAL_VIEW= True
 SECONDS_PER_EP = 100
 SAMPLING_RESOLUTION = 1
 PARAM = [6.3, 2.875] # [ld: look ahead distance, wheel based] 
+REWARD_ARR = [-1, -100, 10, 1000, -50]
+
 
 class CarENV(gym.Env):
     
-    def __init__(self, Vehicle_model = VEHICLE_MODEL, host = HOST, port = PORT,no_render_mode = NO_RENDER_MODE, time_out  = TIMEOUT, IMG_HEIGHT = IMG_HEIGHT , IMG_WIDTH =IMG_WIDTH, show_local_view = SHOW_LOCAL_VIEW, sampling_resolution = SAMPLING_RESOLUTION, model = PARAM, seconds_per_ep = SECONDS_PER_EP):
+    def __init__(self, Vehicle_model = VEHICLE_MODEL, host = HOST, port = PORT,no_render_mode = NO_RENDER_MODE, time_out  = TIMEOUT, IMG_HEIGHT = IMG_HEIGHT , IMG_WIDTH =IMG_WIDTH, show_local_view = SHOW_LOCAL_VIEW, sampling_resolution = SAMPLING_RESOLUTION, model = PARAM, seconds_per_ep = SECONDS_PER_EP, reward_arr = REWARD_ARR, Debugger = True):
         super().__init__()
         try: 
             #print("Please wait as we attempt to connect to the CARLA server.")
@@ -58,10 +60,18 @@ class CarENV(gym.Env):
         self.camera_observation = None
         self.sampling_resolution = sampling_resolution
         self.Global_Route_Planner = GlobalRoutePlanner(self.world.get_map(), self.sampling_resolution)
+        self.radius = 4 #Gets Radius of the car
+        ''''
+        I had implemented 
+        self.radius = (self.get_Edge_List()) #Gets Radius of the car
+        but car has not been spawned yet: SO we can keep calling this at every reset but for now we can live with the hardcode value
+        '''
+        self.Debugger = Debugger 
         self.model = {'ld': model[0],
-                      'wheel_base': model[1]}
+                      'wheel_base': model[1],
+                      'raduis': self.radius}
         self.seconds_per_episode = seconds_per_ep
-
+        self.reward_array = reward_arr #Based on MObile Path planning in Dynamic Environments through globally guided reinforcement learning
         self.episodes = 0
         
 
@@ -107,12 +117,15 @@ class CarENV(gym.Env):
                      'location': []
                     }
 
+        self.N = 0 #used in reward function
         
+
+
         self.episodes += 1
 
         self.collision = {'collision':False}  #check the collision sensor
         self.actor_lst = []
-        if not start_point:        
+        if start_point == None:        
             self.start_transform = np.random.choice(self.spawn_points)
         else:
             self.start_transform = start_point    
@@ -167,10 +180,12 @@ class CarENV(gym.Env):
         self.vehicle.apply_control(self.control)
         
         ############ Tracing a Global Route ############
-        if not end_point:
-            end_point = random.choice(self.spawn_points)
+        if end_point == None:
+            self.end_point = random.choice(self.spawn_points)
+        else:
+            self.end_point = end_point
 
-        self.route = self.Global_Route_Planner.trace_route(self.start_transform.location, end_point.location)
+        self.route = self.Global_Route_Planner.trace_route(self.start_transform.location, self.end_point.location)
         self.waypoint_lst = []
         for waypoint, _ in self.route:
             loc = waypoint.transform.location
@@ -180,12 +195,12 @@ class CarENV(gym.Env):
         Make this in
         '''
         self.path_visualizor()
-        self.control.throttle = 0.25
+        self.control.throttle = 0.5
         
         self.vehicle.apply_control(self.control)
 
         
-
+        
         print(f"The environmnet has been reset and the episode is {self.episodes}")
         
         while self.camera_flag is None:
@@ -235,27 +250,127 @@ class CarENV(gym.Env):
             alpha = math.atan2((ty - y), (tx-x)) - yaw
             steering_angle = np.clip(math.atan2(2*L*math.sin(alpha),ld ),-1,1)
             return steering_angle
+    
+    def get_bounding(self):
+        bb = self.vehicle.bounding_box.get_world_vertices(self.vehicle.get_transform())
+        z_loc = [z.z for z in bb]
+        s = [z == min(z_loc) for z in z_loc]
+        enumerated_list = list(enumerate(z_loc))
+        min_element = min(z_loc)
+        min_indices = [index for (index, element) in enumerated_list if element == min_element]
+        vert = list()
+        for i in min_indices:
+            vert.append((bb[i]))
+        return vert
 
-    def get_reward(self):
+    def get_reward(self, On_global_flag, end_flag):
+        # self.Reward_array = [-1, -100, 10, 1000, -50]
         if self.collision['collision'] == True:
             done = True
-            reward  = -10
+            reward  = self.reward_array[0] + self.reward_array[1]
 
-        else: 
+        elif not On_global_flag: 
+            self.N += 1
             done = False
-            reward = 10
-        if self.episode_start_time + self.seconds_per_episode < time.time(): #This means that the time of the episode has expired
+            reward = self.reward_array[0]
+        elif On_global_flag:
+            self.N = 0
+            reward = self.reward_array[0] + self.N * self.reward_array[2]
+        elif self.episode_start_time + self.seconds_per_episode < time.time(): #This means that the time of the episode has expired
             done = True
-            reward = 0
+            reward = self.reward_array[-1]
+        elif end_flag:
+            reward =self.reward_array[3]
+            done = True
+        if self.Debugger:
+            print(f"The reawrd is {reward} and done is{done}")
+
 
         # #print(f"the reward is = {reward}")
         return reward, done
 
+    ##### Aux Variables to check if on global route:
+    def get_edges(self,min_indices):
+        edges = [[0,1], [1,3], [3,2], [2,0], [0,4], [4,5], [5,1], [5,7], [7,6], [6,4], [6,2], [7,3]]
+        min_edges = []
+        for edge in edges:
+            i,j = tuple(edge)
+            if i in min_indices and j in min_indices:
+                min_edges.append((i,j))
 
+        return min_edges
+
+    def get_Edge_List(self):
+        bb = self.vehicle.bounding_box.get_world_vertices(self.vehicle.get_transform())
+        z_loc = [z.z for z in bb]
+        enumerated_list = list(enumerate(z_loc))
+        min_element = min(z_loc)
+        min_indices = [index for (index, element) in enumerated_list if element == min_element]
+        min_edges = self.get_edges(min_indices)
+        Edge_lst = list()
+        for i,j in min_edges:
+            Edge_lst.append(((bb[i].x,bb[i].y),(bb[j].x,bb[j].y)))
+        return Edge_lst
+    
+    def get_distance(self, p1, p2):
+        p1 = np.array(p1)
+        p2 = np.array(p2)
+        dist = np.linalg.norm(p1 - p2)
+        return dist
+
+
+
+    def car_radius(self,edge_lst):
+        diameter = 0
+        for p1,p2 in edge_lst:
+            distance = self.get_distance(p1, p2)
+            if distance >= diameter:
+                diameter = distance
+        return diameter/2
+
+    def isInside(self,circle_x, circle_y, x, y):
+     
+        # Compare radius of circle
+        # with distance of its center
+        # from given point
+        if ((x - circle_x) * (x - circle_x) +
+            (y - circle_y) * (y - circle_y) <= self.radius * self.radius):
+            return True
+        else:
+            return False
+
+
+    def check_if_on_waypoint( self):
+    
+        circle_x, circle_y = self.vehicle_transform.location.x,self.vehicle_transform.location.y
+
+        for (x,y) in self.waypoint_lst:
+            global_waypoint = carla.Location(x = x, y = y)
+            
+            
+            flag = self.isInside(circle_x, circle_y, self.radius, global_waypoint.x, global_waypoint.y)
+            if flag:
+                self.world.debug.draw_string(global_waypoint, '0', draw_shadow=False,
+                    color=carla.Color(r=255, g=0, b=0), life_time=5.0,
+                    persistent_lines=True)
+                break
+        return flag    
+
+    def check_if_end(self):
+        circle_x, circle_y = self.vehicle_transform.location.x,self.vehicle_transform.location.y
+        end_x = self.end_point.location.x
+        end_y = self.end_point.location.y
+        flag = self.isInside(circle_x, circle_y, self.radius, end_x, end_y)
+
+        return flag
     def step(self, action):
+
         '''
         self.vehicle_transform: is the vehicle transform at a given step
         '''
+        On_global_flag = False #Flag to check if on global route
+        On_end_point = False # Flag to check if the vehicle has reached end point
+
         self.vehicle_transform = self.vehicle.get_transform()
         target = self.get_target(action)
         self.velocity = self.get_vehicle_velocity()
@@ -274,14 +389,15 @@ class CarENV(gym.Env):
         self.vehicle.apply_control(self.control)
 
         ##### Might Add a PID controller here to control velocity
-
-        reward, done = self.get_reward()
+        On_global_flag = self.check_if_on_waypoint()
+        reward, done = self.get_reward(On_global_flag)
 
         self.info['velocity'].append(v_kmh)
         self.info['location'].append(coordinates)
         
         time.sleep(0.1)
-        
+        if self.Debugger:
+            print(f'Step since global {self.N}')
       
 
         return self.camera_observation, reward, done,  self.info
@@ -327,7 +443,7 @@ class CarENV(gym.Env):
             except:
                 #print(f'Actor {act} was not destroyed')
                 pass
-        
+    
         
         
     
