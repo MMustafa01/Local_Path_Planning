@@ -1,5 +1,4 @@
 import  gym
-import stable_baselines3
 import sys
 import math 
 import random 
@@ -9,7 +8,8 @@ import cv2
 import matplotlib.pyplot as plt
 import carla
 from gym.spaces import Discrete, Box
-sys.path.append(("C:/CARLA/WindowsNoEditor/PythonAPI/carla"))
+# sys.path.append(("C:/CARLA/WindowsNoEditor/PythonAPI/carla"))
+sys.path.append(("C:/Users/netbot/CARLA/WindowsNoEditor/PythonAPI/carla"))
 from agents.navigation.global_route_planner import GlobalRoutePlanner
 
 '''
@@ -60,7 +60,7 @@ class CarENV(gym.Env):
         self.camera_observation = None
         self.sampling_resolution = sampling_resolution
         self.Global_Route_Planner = GlobalRoutePlanner(self.world.get_map(), self.sampling_resolution)
-        self.radius = 4 #Gets Radius of the car
+        self.radius = 2.5 #Gets Radius of the car
         ''''
         I had implemented 
         self.radius = (self.get_Edge_List()) #Gets Radius of the car
@@ -91,7 +91,7 @@ class CarENV(gym.Env):
     def path_visualizor(self):
          for waypoint in self.route:
             self.world.debug.draw_string(waypoint[0].transform.location, '^', draw_shadow=False,
-                color=carla.Color(r=0, g=0, b=255), life_time=60.0,
+                color=carla.Color(r=0, g=0, b=255), life_time=5.0,
                 persistent_lines=True)
 
 
@@ -127,6 +127,7 @@ class CarENV(gym.Env):
         self.actor_lst = []
         if start_point == None:        
             self.start_transform = np.random.choice(self.spawn_points)
+            # self.start_transform = self.spawn_points[0]
         else:
             self.start_transform = start_point    
         self.vehicle = self.world.try_spawn_actor(self.vehicle_model, self.start_transform)
@@ -199,7 +200,7 @@ class CarENV(gym.Env):
         
         self.vehicle.apply_control(self.control)
 
-        
+        time.sleep(0.1)
         
         print(f"The environmnet has been reset and the episode is {self.episodes}")
         
@@ -274,8 +275,11 @@ class CarENV(gym.Env):
             done = False
             reward = self.reward_array[0]
         elif On_global_flag:
+            done = False
+            
+            reward = self.reward_array[0] + (self.N+1) * self.reward_array[2]
+            print("This condition is run", On_global_flag, reward)
             self.N = 0
-            reward = self.reward_array[0] + self.N * self.reward_array[2]
         elif self.episode_start_time + self.seconds_per_episode < time.time(): #This means that the time of the episode has expired
             done = True
             reward = self.reward_array[-1]
@@ -283,7 +287,7 @@ class CarENV(gym.Env):
             reward =self.reward_array[3]
             done = True
         if self.Debugger:
-            print(f"The reawrd is {reward} and done is{done}")
+            print(f"The reward is {reward} and done is{done}, and steps since g = {self.N}")
 
 
         # #print(f"the reward is = {reward}")
@@ -348,7 +352,7 @@ class CarENV(gym.Env):
             global_waypoint = carla.Location(x = x, y = y)
             
             
-            flag = self.isInside(circle_x, circle_y, self.radius, global_waypoint.x, global_waypoint.y)
+            flag = self.isInside(circle_x, circle_y, global_waypoint.x, global_waypoint.y)
             if flag:
                 self.world.debug.draw_string(global_waypoint, '0', draw_shadow=False,
                     color=carla.Color(r=255, g=0, b=0), life_time=5.0,
@@ -360,7 +364,7 @@ class CarENV(gym.Env):
         circle_x, circle_y = self.vehicle_transform.location.x,self.vehicle_transform.location.y
         end_x = self.end_point.location.x
         end_y = self.end_point.location.y
-        flag = self.isInside(circle_x, circle_y, self.radius, end_x, end_y)
+        flag = self.isInside(circle_x, circle_y, end_x, end_y)
 
         return flag
     def step(self, action):
@@ -390,14 +394,14 @@ class CarENV(gym.Env):
 
         ##### Might Add a PID controller here to control velocity
         On_global_flag = self.check_if_on_waypoint()
-        reward, done = self.get_reward(On_global_flag)
+        On_end_point = self.check_if_end()
+        reward, done = self.get_reward(On_global_flag, On_end_point)
 
         self.info['velocity'].append(v_kmh)
         self.info['location'].append(coordinates)
         
         time.sleep(0.1)
-        if self.Debugger:
-            print(f'Step since global {self.N}')
+        
       
 
         return self.camera_observation, reward, done,  self.info
@@ -458,6 +462,6 @@ cv2.stop()
         
 if __name__ == '__main__':
     car =  CarENV()
-    #print(car)
+    print(car)
 
 
