@@ -29,10 +29,10 @@ FOV = 110
 NO_RENDER_MODE = False
 TIMEOUT = 10.0
 SHOW_LOCAL_VIEW= True
-SECONDS_PER_EP = 100
+SECONDS_PER_EP = 200
 SAMPLING_RESOLUTION = 1
 PARAM = [6.3, 2.875] # [ld: look ahead distance, wheel based] 
-REWARD_ARR = [-1, -100, 10, 1000, -50]
+REWARD_ARR = [-1, -1000, 2, 1000, -50, -2]
 
 
 class CarENV(gym.Env):
@@ -60,7 +60,7 @@ class CarENV(gym.Env):
         self.camera_observation = None
         self.sampling_resolution = sampling_resolution
         self.Global_Route_Planner = GlobalRoutePlanner(self.world.get_map(), self.sampling_resolution)
-        self.radius = 2.5 #Gets Radius of the car
+        self.radius = 2.25 #Gets Radius of the car
         ''''
         I had implemented 
         self.radius = (self.get_Edge_List()) #Gets Radius of the car
@@ -132,7 +132,7 @@ class CarENV(gym.Env):
         self.actor_lst = []
         if start_point == None:        
             # self.start_transform = np.random.choice(self.spawn_points)
-            self.start_transform = np.random.choice(self.spawn_points[0:20])
+            self.start_transform = np.random.choice(self.spawn_points[121:122])
         else:
             self.start_transform = start_point    
         self.vehicle = self.world.try_spawn_actor(self.vehicle_model, self.start_transform)
@@ -188,7 +188,8 @@ class CarENV(gym.Env):
         ############ Tracing a Global Route ############
         if end_point == None:
             # self.end_point = random.choice(self.spawn_points)
-            self.end_point = random.choice(self.spawn_points[40:70])
+            lst = self.spawn_points[5:10] + self.spawn_points[11:20]
+            self.end_point = random.choice(lst)
         else:
             self.end_point = end_point
 
@@ -356,16 +357,18 @@ class CarENV(gym.Env):
             reward = self.reward_array[0] + (self.N+1) * self.reward_array[2]
             # print("This condition is run", On_global_flag, reward)
             self.N = 0
-        elif self.episode_start_time + self.seconds_per_episode < time.time(): #This means that the time of the episode has expired
-            done = True
-            reward = self.reward_array[-1]
+        
         elif end_flag:
             reward =self.reward_array[3]
+            print("End is Reached")
             done = True
+        
+        if self.episode_start_time + self.seconds_per_episode < time.time(): #This means that the time of the episode has expired
+            done = True
+            reward = self.reward_array[-1]
         if self.Debugger:
             print(f"The reward is {reward} and done is{done}, and steps since g = {self.N}")
         self.total_reward += reward
-
         return reward, done
 
     ##### Aux Variables to check if on global route:
@@ -460,7 +463,7 @@ class CarENV(gym.Env):
 
         self.vehicle_transform = self.vehicle.get_transform()
 
-
+        # print(f"The time: \n {self.episode_start_time + self.seconds_per_episode} and {time.time()-self.episode_start_time}")
         ####### The action function performs the action themselves ######
         self.get_action(action)
 
