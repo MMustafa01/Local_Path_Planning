@@ -47,6 +47,10 @@ class CarENV(gym.Env):
     
     def __init__(self, Vehicle_model = VEHICLE_MODEL, host = HOST, port = PORT,no_render_mode = NO_RENDER_MODE, time_out  = TIMEOUT, IMG_HEIGHT = IMG_HEIGHT , IMG_WIDTH =IMG_WIDTH, show_local_view = SHOW_LOCAL_VIEW, sampling_resolution = SAMPLING_RESOLUTION, model = PARAM, seconds_per_ep = SECONDS_PER_EP, reward_arr = REWARD_ARR, Debugger = True, start_end_dic = START_END_DIC, dt = DT, action_space_type = 'Discrete'):
         super().__init__()
+        self.host = host
+        self.port = port
+        self.time_out = time_out
+
         try: 
             #print("Please wait as we attempt to connect to the CARLA server.")
             self.client = carla.Client(host, port)        
@@ -191,7 +195,20 @@ class CarENV(gym.Env):
         self.start_transform, self.end_point =  self.get_start_end_transform()
         self.vehicle = self.world.try_spawn_actor(self.vehicle_model, self.start_transform)
         if  self.vehicle == None:
-            raise Exception("Failed to spawn the vehicle")
+            print("Failed to spawn the vehicle")
+            print("Connecting to the server once again")
+            try: 
+                #print("Please wait as we attempt to connect to the CARLA server.")
+                self.client = carla.Client(self.host, self.port)        
+                self.client.set_timeout(self.time_out)
+                #print("You have successfully connected to the CARLA server.")
+            except:
+                raise Exception("Sorry you were unable to connect to the CARLA server. Check if you have a CARLA server running.")
+            self.world = self.client.get_world()
+            self.bp_lip = self.world.get_blueprint_library()
+            self.spawn_points = self.world.get_map().get_spawn_points() 
+            # self.vehicle_model = self.bp_lip.filter(Vehicle_model)[0]
+            self.vehicle = self.world.try_spawn_actor(self.vehicle_model, self.start_transform)
         self.actor_lst.append(self.vehicle)
 
         ###### Spawning a top view camera #######
@@ -206,7 +223,7 @@ class CarENV(gym.Env):
         self.Camera_bp.set_attribute("image_size_y", f'{self.IMG_HEIGHT}')
         self.Camera_bp.set_attribute('fov', f"{FOV}")
         
-        cam_transform = carla.Transform(self.vehicle.get_transform().transform(carla.Location(x=-5,z=20)), carla.Rotation(yaw=90, pitch=-90))
+        cam_transform = carla.Transform(self.vehicle.get_transform().transform(carla.Location(x=-5,z=10)), carla.Rotation(yaw=90, pitch=-90))
         transform = carla.Transform(carla.Location(x = 2.5, z = 0.7), carla.Rotation(pitch = 0))
         
 

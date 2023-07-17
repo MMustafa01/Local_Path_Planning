@@ -212,13 +212,19 @@ class CarENV(gym.Env):
         info = None
         #print(type(np.array(self.camera_observation))) 
         return self.camera_observation
-
-
+    
     def get_vehicle_coordinates(self):
         vehicle_location = self.vehicle_transform.location
         x = vehicle_location.x
         y = vehicle_location.y
         z = vehicle_location.z
+        return (x, y, z)
+
+    def get_target_coordinates(self,transform):
+        target = transform.location
+        x = target.x
+        y = target.y
+        z = target.z
         return (x, y, z)
     
     def get_vehicle_velocity(self):        
@@ -233,13 +239,21 @@ class CarENV(gym.Env):
         # #print(action)
         if action == 0:
             # Go left
-            target = (x - self.sampling_resolution, y + self.sampling_resolution)
+            transform = carla.Transform(self.vehicle.get_transform().transform(carla.Location(x=-self.sampling_resolution*10, y =self.sampling_resolution*5)))
+            target_coor = self.get_target_coordinates(transform) 
+            target = (target_coor[0], target_coor[1])
         elif action == 1:
             #  Go forward
-            target = (x , y + self.sampling_resolution)
+            transform = carla.Transform(self.vehicle.get_transform().transform(carla.Location( y =self.sampling_resolution*5)))
+            target_coor = self.get_target_coordinates(transform) 
+            target = (target_coor[0], target_coor[1])
+            # target = (x + self.sampling_resolution*10 , y + self.sampling_resolution*10)
         elif action == 2:
             # Go Right
-            target = (x , y + self.sampling_resolution)
+            transform = carla.Transform(self.vehicle.get_transform().transform(carla.Location(x=-self.sampling_resolution*10, y =self.sampling_resolution*5)))
+            target_coor = self.get_target_coordinates(transform) 
+            target = (target_coor[0], target_coor[1])
+            # target = (x , y + self.sampling_resolution*10)
         return target
     
 
@@ -250,6 +264,7 @@ class CarENV(gym.Env):
             x, y, z = coordinates
             alpha = math.atan2((ty - y), (tx-x)) - yaw
             steering_angle = np.clip(math.atan2(2*L*math.sin(alpha),ld ),-1,1)
+            
             return steering_angle
     
     def get_bounding(self):
@@ -382,6 +397,9 @@ class CarENV(gym.Env):
 
 
         coordinates = self.get_vehicle_coordinates()
+        self.world.debug.draw_string(carla.Location(x = target[0], y = target[1]), '+', draw_shadow=False,
+                    color=carla.Color(r=0, g=255, b=0), life_time=5.0,
+                    persistent_lines=True)
         
         yaw = self.vehicle_transform.rotation.yaw
         yaw = np.radians(yaw)  ### Converting in radians
