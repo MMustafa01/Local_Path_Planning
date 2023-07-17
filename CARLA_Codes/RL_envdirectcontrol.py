@@ -1,4 +1,4 @@
-import  gym
+import gymnasium as gym
 import sys
 import math 
 import random 
@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import carla
-from gym.spaces import Discrete, Box
+from gymnasium.spaces import Discrete, Box
 # sys.path.append(("C:/CARLA/WindowsNoEditor/PythonAPI/carla"))
 sys.path.append(("C:/Users/netbot/CARLA/WindowsNoEditor/PythonAPI/carla"))
 from agents.navigation.global_route_planner import GlobalRoutePlanner
@@ -32,12 +32,20 @@ SHOW_LOCAL_VIEW= True
 SECONDS_PER_EP = 200
 SAMPLING_RESOLUTION = 1
 PARAM = [6.3, 2.875] # [ld: look ahead distance, wheel based] 
-REWARD_ARR = [-1, -1000, 2, 1000, -50, -2]
+REWARD_ARR = [-1, -1000, 2, 1000, -1200]
+DT = 0.1 #Fixed time step
+
+START_END_DIC = {7:[8,9,15,16,19,20], 
+                 6:[8,9,15,16,19,20],
+                 121: [12,13,14,11],
+                 13: [6,7,8,9,11,12,15,16,20],
+                 14: [6,7,8,9,11,12,15,16,20]
+                 }
 
 
 class CarENV(gym.Env):
     
-    def __init__(self, Vehicle_model = VEHICLE_MODEL, host = HOST, port = PORT,no_render_mode = NO_RENDER_MODE, time_out  = TIMEOUT, IMG_HEIGHT = IMG_HEIGHT , IMG_WIDTH =IMG_WIDTH, show_local_view = SHOW_LOCAL_VIEW, sampling_resolution = SAMPLING_RESOLUTION, model = PARAM, seconds_per_ep = SECONDS_PER_EP, reward_arr = REWARD_ARR, Debugger = True):
+    def __init__(self, Vehicle_model = VEHICLE_MODEL, host = HOST, port = PORT,no_render_mode = NO_RENDER_MODE, time_out  = TIMEOUT, IMG_HEIGHT = IMG_HEIGHT , IMG_WIDTH =IMG_WIDTH, show_local_view = SHOW_LOCAL_VIEW, sampling_resolution = SAMPLING_RESOLUTION, model = PARAM, seconds_per_ep = SECONDS_PER_EP, reward_arr = REWARD_ARR, Debugger = True, start_end_dic = START_END_DIC, dt = DT, action_space_type = 'Discrete'):
         super().__init__()
         try: 
             #print("Please wait as we attempt to connect to the CARLA server.")
@@ -50,9 +58,31 @@ class CarENV(gym.Env):
         self.bp_lip = self.world.get_blueprint_library()
         self.spawn_points = self.world.get_map().get_spawn_points() 
         self.vehicle_model = self.bp_lip.filter(Vehicle_model)[0]
+
+
+
+        #  Fixed time step
+        self.dt = dt
+
+        ####### CARLA SERVER SETTING ######################
+        '''
+        Implementing synchronous mode and no rendering mode
+        '''
         self.settings = self.world.get_settings()
         self.settings.no_rendering_mode = no_render_mode
+        
+        self.settings.fixed_delta_seconds = self.dt
+        
         self.world.apply_settings(self.settings)
+        
+
+        # Recording the time of total steps and reseting step
+        self.reset_step = 0
+        self.time_step = 0
+        self.total_steps = 0
+  
+
+
         self.IMG_HEIGHT = IMG_HEIGHT
         self.IMG_WIDTH =IMG_WIDTH
         self.SHOW_LOCAL_VIEW = show_local_view 
@@ -79,28 +109,49 @@ class CarENV(gym.Env):
         self.steps = 0
         self.N = 0 #used in reward function
         
-
-        self.action_space = Discrete(4) #Left, Up, right, Follow_pure
+        self.action_space_type = action_space_type
+        print(f'This is printrf {self.action_space_type }')
+        if self.action_space_type == 'Discrete':
+            self.action_space = Discrete(4) #Left, Up, right, Follow_pure
+        elif self.action_space_type == 'Box':
+            print("This")
+            self.action_space == Box(low = np.array([0]), high=np.array([3]), dtype=np.int64)
+        
         self.observation_space = Box(
             low=0, high=255, shape=[IMG_HEIGHT, IMG_WIDTH, 3], dtype=np.uint8)
-        # np.uint8
-        '''
-        Need to do:
-            1. Complete the Reset method, i.e. 
-                a) The me
 
-        
-        
-        '''
+        self.start_end_dic = start_end_dic
+
+        self.action_lst = []
 
     def path_visualizor(self):
          for waypoint in self.route:
             self.world.debug.draw_string(waypoint[0].transform.location, '^', draw_shadow=False,
-                color=carla.Color(r=0, g=0, b=255), life_time=5.0,
+                color=carla.Color(r=0, g=0, b=255), life_time=5,
                 persistent_lines=True)
 
 
-    def reset(self, seed=None, options=None, start_point = None, end_point = None):
+
+    def get_start_end_transform(self):
+        '''
+        start_end_dic = {7:[8,9,15,16,19,20], 
+                 6:[8,9,15,16,19,20],
+                 121: [12,13,14,11],
+                 13: [6,7,8,9,11,12,15,16,20],
+                 14: [6,7,8,9,11,12,15,16,20]
+                 }
+        '''
+        start_transform_idx = random.choice(list(self.start_end_dic.keys()))
+        end_transform_idx = random.choice(self.start_end_dic[start_transform_idx])
+
+        start_transform = self.spawn_points[start_transform_idx]
+        end_transform = self.spawn_points[end_transform_idx]
+
+        return start_transform, end_transform
+    
+
+
+    def reset(self, seed=None, options=None):
         '''
         Params:
             start_point: The vehicle transform at the start of the route
@@ -130,11 +181,14 @@ class CarENV(gym.Env):
         self.collision_hist = {'event' :None} #Just to print the collision event
         self.collision = {'collision':False}  #check the collision sensor
         self.actor_lst = []
-        if start_point == None:        
-            # self.start_transform = np.random.choice(self.spawn_points)
-            self.start_transform = np.random.choice(self.spawn_points[121:122])
-        else:
-            self.start_transform = start_point    
+        self.remaining_time = 0
+
+        try:
+            print(self.action_lst)
+        finally:
+            self.action_lst = []
+    
+        self.start_transform, self.end_point =  self.get_start_end_transform()
         self.vehicle = self.world.try_spawn_actor(self.vehicle_model, self.start_transform)
         if  self.vehicle == None:
             raise Exception("Failed to spawn the vehicle")
@@ -186,12 +240,7 @@ class CarENV(gym.Env):
         self.vehicle.apply_control(self.control)
         
         ############ Tracing a Global Route ############
-        if end_point == None:
-            # self.end_point = random.choice(self.spawn_points)
-            lst = self.spawn_points[5:10] + self.spawn_points[11:20]
-            self.end_point = random.choice(lst)
-        else:
-            self.end_point = end_point
+        
 
         self.route = self.Global_Route_Planner.trace_route(self.start_transform.location, self.end_point.location)
         self.waypoint_lst = []
@@ -207,23 +256,28 @@ class CarENV(gym.Env):
         
         self.vehicle.apply_control(self.control)
 
-        time.sleep(0.1)
+        # time.sleep(0.1)
         
-        print(f"The environmnet has been reset. The total reward was {self.total_reward}. And steps were {self.steps} and the episode is {self.episodes}")
+        print(f"The environmnet has been reset. The total reward was {self.total_reward}. And steps were {self.time_step} and the episode is {self.reset_step} and the total_steps are {self.total_steps}")
         self.total_reward = 0
         self.steps = 0
         self.N = 0 #used in reward function
+
+        
+        self.reset_step += 1
+        self.time_step = 0
         
 
 
         while self.camera_flag is None:
-            time.sleep(0.01)
+            # time.sleep(0.01)
+            pass
             #print('.',end='')
 
         self.episode_start_time = time.time()
         info = None
         #print(type(np.array(self.camera_observation))) 
-        return self.camera_observation
+        return self.camera_observation, self.info
     
     def get_vehicle_coordinates(self):
         vehicle_location = self.vehicle_transform.location
@@ -246,31 +300,57 @@ class CarENV(gym.Env):
         return velocity
 
     def get_action(self, action):
-        
+        """If the PP reaches the final global way_point"""
+        Done = False
+
         x, y, z = self.get_vehicle_coordinates()
-        # #print(action)
-        if action == 0:
-            # Go left
-            self.control.steer = -1
-        elif action == 1:
-            self.control.steer = 0
-        elif action == 2:
-            self.control.steer = 1
-        elif action == 3:
-            ## Follow pure pursuit
-            _, global_target, info = self.get_global_target()
-            yaw = self.vehicle_transform.rotation.yaw
-            steering = self.get_steering(global_target, (x,y,z), yaw )
-            self.control.steer = steering
-            global_target_way = carla.Location(x= global_target[0], y= global_target[1])
-            self.world.debug.draw_string(global_target_way, '0', draw_shadow=False,
-                        color=carla.Color(r=0, g=255, b=0), life_time=5.0,
-                        persistent_lines=True)
+
+        if self.action_space_type == 'Discrete':
+            if action == 0:
+                # Go left
+                self.control.steer = -1
+            elif action == 1:
+                self.control.steer = 0
+            elif action == 2:
+                self.control.steer = 1
+            elif action == 3:
+                ## Follow pure pursuit
+                _, global_target, info = self.get_global_target()
+                yaw = self.vehicle_transform.rotation.yaw
+                steering = self.get_steering(global_target, (x,y,z), yaw )
+                self.control.steer = steering
+                global_target_way = carla.Location(x= global_target[0], y= global_target[1])
+                self.world.debug.draw_string(global_target_way, '0', draw_shadow=False,
+                            color=carla.Color(r=0, g=255, b=0), life_time=2.5,
+                            persistent_lines=True)
+                if info:
+                    Done = True
+            
+        elif self.action_space_type == 'Box':
+            if action[0] == 0:
+                # Go left
+                self.control.steer = -1
+            elif action[0] == 1:
+                self.control.steer = 0
+            elif action[0] == 2:
+                self.control.steer = 1
+            elif action[0] == 3:
+                ## Follow pure pursuit
+                _, global_target, info = self.get_global_target()
+                yaw = self.vehicle_transform.rotation.yaw
+                steering = self.get_steering(global_target, (x,y,z), yaw )
+                self.control.steer = steering
+                global_target_way = carla.Location(x= global_target[0], y= global_target[1])
+                self.world.debug.draw_string(global_target_way, '0', draw_shadow=False,
+                            color=carla.Color(r=0, g=255, b=0), life_time=2.5,
+                            persistent_lines=True)
+                if info:
+                    Done = True
         
         self.vehicle.apply_control(self.control)
         if self.Debugger == True:
             print(f'The action chosen was {action}', end = '||')
-
+        return Done
         # return target
     
 
@@ -342,33 +422,50 @@ class CarENV(gym.Env):
 
     def get_reward(self, On_global_flag, end_flag):
         # self.Reward_array = [-1, -100, 10, 1000, -50]
+        # print()
+        if self.time_step >self.seconds_per_episode: #This means that the time of the episode has expired
+            done = True
+            print(f"Done condition: max time steps reached")
+            reward = self.reward_array[-1]
+            self.total_reward += reward
+            if self.Debugger:
+                print("The episode time has elapsed")
+                
+            return reward, done
+        
         if self.collision['collision'] == True:
             done = True
-
+            print(f"Done condition: collision")
             reward  = self.reward_array[0] + self.reward_array[1]
-
+            self.total_reward += reward
+            return reward, done
+        
         elif not On_global_flag: 
             self.N += 1
             done = False
             reward = self.reward_array[0]
-        elif On_global_flag:
+            self.total_reward += reward
+            return reward, done
+        elif On_global_flag and not end_flag:
             done = False
             
             reward = self.reward_array[0] + (self.N+1) * self.reward_array[2]
             # print("This condition is run", On_global_flag, reward)
             self.N = 0
-        
+            self.total_reward += reward
+            return reward, done
         elif end_flag:
             reward =self.reward_array[3]
             print("End is Reached")
             done = True
+            print(f"Done condition: end flag")
+            self.total_reward += reward
+            return reward, done
         
-        if self.episode_start_time + self.seconds_per_episode < time.time(): #This means that the time of the episode has expired
-            done = True
-            reward = self.reward_array[-1]
         if self.Debugger:
             print(f"The reward is {reward} and done is{done}, and steps since g = {self.N}")
-        self.total_reward += reward
+        
+
         return reward, done
 
     ##### Aux Variables to check if on global route:
@@ -437,12 +534,12 @@ class CarENV(gym.Env):
                         print("First time visit")
                     self.visited_global_waypoint.append((x,y))
                     self.world.debug.draw_string(global_waypoint, '0', draw_shadow=False,
-                        color=carla.Color(r=255, g=0, b=0), life_time=5.0,
+                        color=carla.Color(r=255, g=0, b=0), life_time=2.5,
                         persistent_lines=True)
                     break
                 else:
                     if self.Debugger:
-                        print("Sorry you have visited this waypoint before")
+                        print("Sorry you have visited this waypoint before", end = ' ||')
         return flag    
 
     def check_if_end(self):
@@ -454,9 +551,18 @@ class CarENV(gym.Env):
         return flag
     
     def step(self, action):
+
+        # if self.time_step%10:
+        #     print(action, '||||', end = ' , ')
         '''
         self.vehicle_transform: is the vehicle transform at a given step
         '''
+        self.action_lst.append(action)
+        if not (self.total_steps + 1)%2048:
+            print("Skiping this step")
+            
+            
+        
         self.steps += 1
         On_global_flag = False #Flag to check if on global route
         On_end_point = False # Flag to check if the vehicle has reached end point
@@ -465,8 +571,8 @@ class CarENV(gym.Env):
 
         # print(f"The time: \n {self.episode_start_time + self.seconds_per_episode} and {time.time()-self.episode_start_time}")
         ####### The action function performs the action themselves ######
-        self.get_action(action)
-
+        check_cond =self.get_action(action)
+        # print(f"The action is {action}")
 
         ##### Getting data for later ######
         self.velocity = self.get_vehicle_velocity()
@@ -478,14 +584,22 @@ class CarENV(gym.Env):
         ##### Might Add a PID controller here to control velocity
         On_global_flag = self.check_if_on_waypoint()
         On_end_point = self.check_if_end()
+        if check_cond:
+            On_end_point = True
         reward, done = self.get_reward(On_global_flag, On_end_point)
 
         self.info['velocity'].append(v_kmh)
         self.info['location'].append(coordinates)
         
-        time.sleep(0.1)
+        self.world.tick()
+    
 
-        return self.camera_observation, reward, done,  self.info
+        self.time_step += 1
+        self.total_steps += 1 
+
+        # time.sleep(0.1)
+        truncated = None
+        return self.camera_observation, reward,truncated, done,  self.info
 
     def get_global_target(self):
         ''' 
