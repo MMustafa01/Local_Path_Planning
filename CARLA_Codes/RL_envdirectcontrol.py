@@ -32,7 +32,7 @@ SHOW_LOCAL_VIEW= True
 SECONDS_PER_EP = 200
 SAMPLING_RESOLUTION = 1
 PARAM = [6.3, 2.875] # [ld: look ahead distance, wheel based] 
-REWARD_ARR = [-1, -1000, 2, 1000, -1200]
+REWARD_ARR = [-1, -1000, 10, 1000, -1200] # [normal, coll, back on global, time up]
 DT = 0.1 #Fixed time step
 
 START_END_DIC = {7:[8,9,15,16,19,20], 
@@ -42,6 +42,19 @@ START_END_DIC = {7:[8,9,15,16,19,20],
                  14: [6,7,8,9,11,12,15,16,20]
                  }
 
+
+
+
+
+'''
+Things to do:
+1. Improve the start and end dictionary
+2. Make action space box, and use that for steering values, also throttle values
+3. Try to make the observation space bigger
+4. Implement a video saving method
+
+
+'''
 
 class CarENV(gym.Env):
     
@@ -114,11 +127,11 @@ class CarENV(gym.Env):
         self.N = 0 #used in reward function
         
         self.action_space_type = action_space_type
-        print(f'This is printrf {self.action_space_type }')
+ 
         if self.action_space_type == 'Discrete':
             self.action_space = Discrete(4) #Left, Up, right, Follow_pure
         elif self.action_space_type == 'Box':
-            print("This")
+
             self.action_space == Box(low = np.array([0]), high=np.array([3]), dtype=np.int64)
         
         self.observation_space = Box(
@@ -145,6 +158,7 @@ class CarENV(gym.Env):
                  14: [6,7,8,9,11,12,15,16,20]
                  }
         '''
+
         start_transform_idx = random.choice(list(self.start_end_dic.keys()))
         end_transform_idx = random.choice(self.start_end_dic[start_transform_idx])
 
@@ -184,6 +198,8 @@ class CarENV(gym.Env):
 
         self.collision_hist = {'event' :None} #Just to print the collision event
         self.collision = {'collision':False}  #check the collision sensor
+
+        self.lane_change = {'Solid':False, 'Broken':False}
         self.actor_lst = []
         self.remaining_time = 0
 
@@ -230,14 +246,16 @@ class CarENV(gym.Env):
         self.Camera  =self.world.try_spawn_actor(self.Camera_bp, cam_transform, attach_to= self.vehicle)
         self.actor_lst.append(self.Camera)
         
-        ###### Spawn Collision Sensor ######## sensor.other.collision
+        ###### Spawn Collision Sensor ######## 
         collision_Sensor_bp = self.bp_lip.find("sensor.other.collision")
 
         
         self.collision_Sensor = self.world.try_spawn_actor(collision_Sensor_bp, transform,  attach_to =  self.vehicle)
         self.actor_lst.append(self.collision_Sensor)
         
-        
+        ###### Implementing a lane invasion sensor ######
+        lane_inv_bp = self.bp_lip.find("sensor.other.lane_invasion")
+        self.lane_sensor = self.world.try_spawn_actor(lane_inv_bp, carla.Transform(), attach_to = self.vehicle)
 
         
         spectator = self.world.get_spectator() 
@@ -248,6 +266,7 @@ class CarENV(gym.Env):
         ''' set sensor recording'''
         self.Camera.listen(lambda data:self.process_img(data))
         self.collision_Sensor.listen(lambda event: self.collision_detector(event))
+        self.lane_sensor.listen(lambda event: self.on_invasion(event))
 
 
         '''Apparently this makes the spawning quicker'''
@@ -437,53 +456,61 @@ class CarENV(gym.Env):
             vert.append((bb[i]))
         return vert
 
+    def get_done_event(self, end_flag):
+        # done \in {2 -> coll, 3 -> lanechange,1 ->time up, 0 -> not done }
+        if self.time_step >self.seconds_per_episode: #This means that the time of the episode has expired
+            done = 1
+        elif self.collision['collision'] == True:
+            done = 2
+        elif self.lane_change['Solid'] == True:
+            done = 3
+        elif end_flag:
+            done = 4
+        else:
+            done = 0
+
+        return done
     def get_reward(self, On_global_flag, end_flag):
         # self.Reward_array = [-1, -100, 10, 1000, -50]
         # print()
-        if self.time_step >self.seconds_per_episode: #This means that the time of the episode has expired
+        done_dic = {1:"Time up", 2: "collision", 3: "off road",4:"end_flag" ,0: "Not done"}
+        done_num = self.get_done_event(end_flag=end_flag)
+        if done_num:
             done = True
-            print(f"Done condition: max time steps reached")
-            reward = self.reward_array[-1]
-            self.total_reward += reward
-            if self.Debugger:
-                print("The episode time has elapsed")
-                
-            return reward, done
+            if done_num == 1: #This means that the time of the episode has expired
+                print(f"Done condition: max time steps reached")
+                reward = self.reward_array[-1]
+
+
+            elif done_num == 2 or done_num == 3:
+                reward  = self.reward_array[0] + self.reward_array[1]
+
+
+            elif end_flag:
+                reward =self.reward_array[3]
+            print(f"Done condition: {done_dic[done_num]}")
         
-        if self.collision['collision'] == True:
-            done = True
-            print(f"Done condition: collision")
-            reward  = self.reward_array[0] + self.reward_array[1]
-            self.total_reward += reward
-            return reward, done
-        
-        elif not On_global_flag: 
-            self.N += 1
+        else:
             done = False
-            reward = self.reward_array[0]
-            self.total_reward += reward
-            return reward, done
-        elif On_global_flag and not end_flag:
-            done = False
-            
-            reward = self.reward_array[0] + (self.N+1) * self.reward_array[2]
-            # print("This condition is run", On_global_flag, reward)
-            self.N = 0
-            self.total_reward += reward
-            return reward, done
-        elif end_flag:
-            reward =self.reward_array[3]
-            print("End is Reached")
-            done = True
-            print(f"Done condition: end flag")
-            self.total_reward += reward
-            return reward, done
-        
+            if not On_global_flag:
+                if self.lane_change['Broken'] == True: 
+                    reward = self.reward_array[0] * 10
+                elif self.lane_change['Broken'] == False:
+                    reward = self.reward_array[0]
+                self.N += 1
+
+
+            elif On_global_flag:
+                reward = self.reward_array[0] + (self.N+1) * self.reward_array[2]
+                self.N = 0
+        self.total_reward += reward
         if self.Debugger:
             print(f"The reward is {reward} and done is{done}, and steps since g = {self.N}")
-        
-
         return reward, done
+            
+            
+        
+        
 
     ##### Aux Variables to check if on global route:
     def get_edges(self,min_indices):
@@ -505,7 +532,7 @@ class CarENV(gym.Env):
         min_edges = self.get_edges(min_indices)
         Edge_lst = list()
         for i,j in min_edges:
-            Edge_lst.append(((bb[i].x,bb[i].y),(bb[j].x,bb[j].y)))
+            Edge_lst.append(((bb[i].x,bb[i].y,bb[i].z ),(bb[j].x,bb[j].y,bb[i].z)))
         return Edge_lst
     
     def get_distance(self, p1, p2):
@@ -664,6 +691,7 @@ class CarENV(gym.Env):
     def close(self):
         pass
 
+######### Sensor Handler
 
     def collision_detector(self, event):
         self.collision['collision'] = True
@@ -673,8 +701,30 @@ class CarENV(gym.Env):
         #print("A collision has occured")
     
         
+    def on_invasion(self, event):
+        lane_types = set(x.type for x in event.crossed_lane_markings)
+        text = ['%r' % str(x).split()[-1] for x in lane_types]
+        for i in range(len(text)):
+            if 'Solid' in str(text[i]): # SolidBroken and BrokenSolid are classified as  as solid here
+                self.lane_change['Solid'] = True
+            elif 'Broken' in str(text[i]) :
+                self.lane_change['Broken'] = True
+            else:
+                print(f'lane type = {text} ')
+            if self.Debugger:
+                print()
+                print('Crossed line %s' % ' and '.join(text))
+                print()
+
 
     def process_img(self, image):
+
+        ''''
+        Get projection matrix
+        Get Edge_lst
+
+        
+        '''
         i = np.array(image.raw_data)
         i2 = i.reshape((self.IMG_HEIGHT, self.IMG_WIDTH, 4))
         i3 = i2[:, :, :3]
@@ -688,6 +738,8 @@ class CarENV(gym.Env):
             #print(f'This is to show that camera image hasn\'t loaded yet: {i3}')
         else:
             self.camera_flag = True
+    
+
     
 
     def destroy_all_actors(self):
