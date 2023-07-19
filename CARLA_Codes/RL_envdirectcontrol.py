@@ -8,6 +8,7 @@ import cv2
 import matplotlib.pyplot as plt
 import carla
 from gymnasium.spaces import Discrete, Box
+import matplotlib.pyplot as plt 
 # sys.path.append(("C:/CARLA/WindowsNoEditor/PythonAPI/carla"))
 sys.path.append(("C:/Users/netbot/CARLA/WindowsNoEditor/PythonAPI/carla"))
 from agents.navigation.global_route_planner import GlobalRoutePlanner
@@ -76,7 +77,8 @@ class CarENV(gym.Env):
         self.spawn_points = self.world.get_map().get_spawn_points() 
         self.vehicle_model = self.bp_lip.filter(Vehicle_model)[0]
 
-
+        ########### image #########
+        self.data_dict = {"rgb_image":None}
 
         #  Fixed time step
         self.dt = dt
@@ -98,7 +100,7 @@ class CarENV(gym.Env):
         self.time_step = 0
         self.total_steps = 0
   
-
+        self.fov = FOV
 
         self.IMG_HEIGHT = IMG_HEIGHT
         self.IMG_WIDTH =IMG_WIDTH
@@ -129,7 +131,7 @@ class CarENV(gym.Env):
         self.action_space_type = action_space_type
  
         if self.action_space_type == 'Discrete':
-            self.action_space = Discrete(5) #Left, Up, right, idle,Follow_pure
+            self.action_space = Discrete(4) #Left, Up, right,Follow_pure
         elif self.action_space_type == 'Box':
             self.action_space = Box(low = np.array([-1,0]), high=np.array([2,1]), dtype=np.float32) #[steer, throttle] if steer > 1.0 then PP
         
@@ -241,7 +243,7 @@ class CarENV(gym.Env):
         self.Camera_bp.set_attribute('fov', f"{FOV}")
         self.Camera_bp.set_attribute('sensor_tick', f'{self.dt}')
         
-        cam_transform = carla.Transform(self.vehicle.get_transform().transform(carla.Location(x=-5,z=10)), carla.Rotation(yaw=90, pitch=-90))
+        cam_transform = carla.Transform(self.vehicle.get_transform().transform(carla.Location(x=5,z=10)), carla.Rotation(yaw=90, pitch=-90))
         transform = carla.Transform(carla.Location(x = 2.5, z = 0.7), carla.Rotation(pitch = 0))
         
 
@@ -266,7 +268,7 @@ class CarENV(gym.Env):
         
 
         ''' set sensor recording'''
-        self.Camera.listen(lambda data:self.process_img(data))
+        self.Camera.listen(lambda data:self.camera_callback(data))
         self.collision_Sensor.listen(lambda event: self.collision_detector(event))
         self.lane_sensor.listen(lambda event: self.on_invasion(event))
 
@@ -305,16 +307,25 @@ class CarENV(gym.Env):
         self.reset_step += 1
         self.time_step = 0
         
-
+        self.camera_buff = []
 
         while self.camera_flag is None:
-            # time.sleep(0.01)
-            pass
+            time.sleep(0.01)
+            print('.',end='')
+
             #print('.',end='')
 
         self.episode_start_time = time.time()
         info = None
-        #print(type(np.array(self.camera_observation))) 
+        
+        self.camera_observation = self.data_dict['rgb_image'][:,:,:3]
+
+
+        ###### Projection and inverse matrix ######
+        self.K = self.build_projection_matrix(self.IMG_WIDTH, self.IMG_HEIGHT, self.fov) # projection matrix
+        self.inverse_matrix = np.array(self.Camera.get_transform().get_inverse_matrix()) #inverse matrix from camera
+
+
         return self.camera_observation, self.info
     
     def get_vehicle_coordinates(self):
@@ -367,9 +378,7 @@ class CarENV(gym.Env):
                             persistent_lines=True)
                 if info:
                     Done = True
-            elif action == 4: #idle
-                self.control.throttle = 0
-                self.control.steer = 0
+
 
         elif self.action_space_type == 'Box': #[steer, throttle] if steer > 1.0 then PP
             self.control.throttle = action[1] # steering
@@ -387,10 +396,10 @@ class CarENV(gym.Env):
                             persistent_lines=True)
                 if info:
                     Done = True
-        print(f"the action is [steering, throttle] = {action}")
+        
         self.vehicle.apply_control(self.control)
         if self.Debugger == True:
-            print(f'The action chosen was {action}', end = '||')
+            print(f"the action is [steering, throttle] = {action}")
         return Done
         # return target
     
@@ -630,7 +639,7 @@ class CarENV(gym.Env):
 
         coordinates = self.get_vehicle_coordinates()
         
-        ##### Might Add a PID controller here to control velocity
+
         On_global_flag = self.check_if_on_waypoint()
         On_end_point = self.check_if_end()
         if check_cond:
@@ -640,14 +649,41 @@ class CarENV(gym.Env):
         self.info['velocity'].append(v_kmh)
         self.info['location'].append(coordinates)
         
-        self.world.tick()
+        
     
 
         self.time_step += 1
         self.total_steps += 1 
+        
 
-        # time.sleep(0.1)
+        ###### Projecting on the camera #########
+        
+        
+        inv_matrix = self.inverse_matrix
+        image = self.data_dict['rgb_image']
+        
+        bounding_box_set = self.world.get_level_bbs(carla.CityObjectLabel.Vehicles)
+        bounding_box_set.extend(self.world.get_level_bbs(carla.CityObjectLabel.Vehicles))
+    
+        for global_transform, _ in self.route:
+            if global_transform == self.route[-1][0]:
+                g_p = self.get_image_point(global_transform.transform.location, self.K,inv_matrix)
+                cv2.circle(image,(int(g_p[0]),int(g_p[1])),5,(0,255,0,255),2)
+            elif global_transform == self.route[0][0]:
+                g_p = self.get_image_point(global_transform.transform.location, self.K, inv_matrix)
+                cv2.circle(image,(int(g_p[0]),int(g_p[1])),5,(0,0,255,255),2)    
+            else:    
+                g_p = self.get_image_point(global_transform.transform.location, self.K, inv_matrix)
+                cv2.circle(image,(int(g_p[0]),int(g_p[1])),5,(255,0,0,255),2)
+
+        g_p = self.get_image_point(self.vehicle.get_transform().location, self.K, inv_matrix)
+        cv2.circle(image,(int(g_p[0]),int(g_p[1])),5,(0,0,255,255),2)
+
+        self.camera_observation = image[:,:,:3]
+        # self.camera_observation = self.data_dict['rgb_image'][:,:,:3]
+        self.img_2_video(image)
         truncated = None
+        self.world.tick()
         return self.camera_observation, reward,truncated, done,  self.info
 
     def get_global_target(self):
@@ -721,40 +757,72 @@ class CarENV(gym.Env):
                 print('Crossed line %s' % ' and '.join(text))
                 print()
 
-
-    def process_img(self, image):
-
-        ''''
-        Get projection matrix
-        Get Edge_lst
-
-        
-        '''
-        i = np.array(image.raw_data)
-        i2 = i.reshape((self.IMG_HEIGHT, self.IMG_WIDTH, 4))
-        i3 = i2[:, :, :3]
-        if self.SHOW_LOCAL_VIEW:
-            cv2.imwrite(f'images\image_{str(self.total_steps)}.jpg', i3[:,:,:3])
-        self.camera_observation = i3
-        # #print(np.shape(np.array(self.camera_observation)))
-        if  self.camera_observation is None:
+    def camera_callback(self, image):
+        image = np.reshape(np.copy(image.raw_data), (image.height, image.width, 4))
+        self.data_dict['rgb_image'] = image
+        self.inverse_matrix = np.array(self.Camera.get_transform().get_inverse_matrix())
+        if  image[:,:,:3] is None:
             self.camera_flag = False
             #print(f'This is to show that camera image hasn\'t loaded yet: {i3}')
         else:
             self.camera_flag = True
+
+
+    def img_2_video(self,image):
+            cv2.imwrite(f'images\image_{str(self.total_steps)}.jpg', image)
+    
+    def get_image_point(self, loc, K, w2c):
+            # Calculate 2D projection of 3D coordinate
+
+            # Format the input coordinate (loc is a carla.Position object)
+            point = np.array([loc.x, loc.y, loc.z, 1])
+            # transform to camera coordinates
+            point_camera = np.dot(w2c, point)
+
+            # New we must change from UE4's coordinate system to an "standard"
+            # (x, y ,z) -> (y, -z, x)
+            # and we remove the fourth componebonent also
+            point_camera = [point_camera[1], -point_camera[2], point_camera[0]]
+
+            # now project 3D->2D using the camera matrix
+            point_img = np.dot(K, point_camera)
+            # normalize
+            point_img[0] /= point_img[2]
+            point_img[1] /= point_img[2]
+
+            return point_img[0:2]
+
+    def build_projection_matrix(self,w, h, fov):
+        focal = w / (2.0 * np.tan(fov * np.pi / 360.0))
+        K = np.identity(3)
+        K[0, 0] = K[1, 1] = focal
+        K[0, 2] = w / 2.0
+        K[1, 2] = h / 2.0
+        return K
+
+
     
 
     
 
     def destroy_all_actors(self):
+        try:
+            car_lst = self.world.get_actors().filter('vehicle.*')
+            print(car_lst)
+            if car_lst:
+                for car in car_lst:
+                    car.destroy()
+
+        except:
+            pass
         for act in self.actor_lst:
             try: 
                 act.destroy()
                 #print(f"Actor {act} has been destroyed")
             except:
-                #print(f'Actor {act} was not destroyed')
+                print(f'Actor {act} was not destroyed')
                 pass
-    
+
         
         
     
