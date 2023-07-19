@@ -32,7 +32,7 @@ SHOW_LOCAL_VIEW= True
 SECONDS_PER_EP = 200
 SAMPLING_RESOLUTION = 1
 PARAM = [6.3, 2.875] # [ld: look ahead distance, wheel based] 
-REWARD_ARR = [-1, -1000, 10, 1000, -1200] # [normal, coll, back on global, time up]
+REWARD_ARR = [-10, -1000, 100, 1000, -1200] # [normal, coll, back on global, time up]
 DT = 0.1 #Fixed time step
 
 START_END_DIC = {7:[8,9,15,16,19,20], 
@@ -129,10 +129,11 @@ class CarENV(gym.Env):
         self.action_space_type = action_space_type
  
         if self.action_space_type == 'Discrete':
-            self.action_space = Discrete(4) #Left, Up, right, Follow_pure
+            self.action_space = Discrete(5) #Left, Up, right, idle,Follow_pure
         elif self.action_space_type == 'Box':
+            self.action_space = Box(low = np.array([-1,0]), high=np.array([2,1]), dtype=np.float32) #[steer, throttle] if steer > 1.0 then PP
+        
 
-            self.action_space == Box(low = np.array([0]), high=np.array([3]), dtype=np.int64)
         
         self.observation_space = Box(
             low=0, high=255, shape=[IMG_HEIGHT, IMG_WIDTH, 3], dtype=np.uint8)
@@ -238,6 +239,7 @@ class CarENV(gym.Env):
         self.Camera_bp.set_attribute("image_size_x", f'{self.IMG_WIDTH}')
         self.Camera_bp.set_attribute("image_size_y", f'{self.IMG_HEIGHT}')
         self.Camera_bp.set_attribute('fov', f"{FOV}")
+        self.Camera_bp.set_attribute('sensor_tick', f'{self.dt}')
         
         cam_transform = carla.Transform(self.vehicle.get_transform().transform(carla.Location(x=-5,z=10)), carla.Rotation(yaw=90, pitch=-90))
         transform = carla.Transform(carla.Location(x = 2.5, z = 0.7), carla.Rotation(pitch = 0))
@@ -345,12 +347,16 @@ class CarENV(gym.Env):
             if action == 0:
                 # Go left
                 self.control.steer = -1
+                self.control.throttle = 0.5
             elif action == 1:
                 self.control.steer = 0
+                self.control.throttle = 0.5
             elif action == 2:
                 self.control.steer = 1
+                self.control.throttle = 0.5
             elif action == 3:
                 ## Follow pure pursuit
+                self.control.throttle = 0.5
                 _, global_target, info = self.get_global_target()
                 yaw = self.vehicle_transform.rotation.yaw
                 steering = self.get_steering(global_target, (x,y,z), yaw )
@@ -361,16 +367,15 @@ class CarENV(gym.Env):
                             persistent_lines=True)
                 if info:
                     Done = True
-            
-        elif self.action_space_type == 'Box':
-            if action[0] == 0:
-                # Go left
-                self.control.steer = -1
-            elif action[0] == 1:
+            elif action == 4: #idle
+                self.control.throttle = 0
                 self.control.steer = 0
-            elif action[0] == 2:
-                self.control.steer = 1
-            elif action[0] == 3:
+
+        elif self.action_space_type == 'Box': #[steer, throttle] if steer > 1.0 then PP
+            self.control.throttle = action[1] # steering
+            if action[0] <= 1:
+                self.control.steer = action[0]
+            else:
                 ## Follow pure pursuit
                 _, global_target, info = self.get_global_target()
                 yaw = self.vehicle_transform.rotation.yaw
@@ -382,7 +387,7 @@ class CarENV(gym.Env):
                             persistent_lines=True)
                 if info:
                     Done = True
-        
+        print(f"the action is [steering, throttle] = {action}")
         self.vehicle.apply_control(self.control)
         if self.Debugger == True:
             print(f'The action chosen was {action}', end = '||')
@@ -472,7 +477,7 @@ class CarENV(gym.Env):
         return done
     def get_reward(self, On_global_flag, end_flag):
         # self.Reward_array = [-1, -100, 10, 1000, -50]
-        # print()
+        # REWARD_ARR = [-1, -1000, 100, 1000, -1200] # [normal, coll, back on global, time up]
         done_dic = {1:"Time up", 2: "collision", 3: "off road",4:"end_flag" ,0: "Not done"}
         done_num = self.get_done_event(end_flag=end_flag)
         if done_num:
@@ -729,8 +734,7 @@ class CarENV(gym.Env):
         i2 = i.reshape((self.IMG_HEIGHT, self.IMG_WIDTH, 4))
         i3 = i2[:, :, :3]
         if self.SHOW_LOCAL_VIEW:
-            cv2.imshow("", i3)
-            cv2.waitKey(1)
+            cv2.imwrite(f'images\image_{str(self.total_steps)}.jpg', i3[:,:,:3])
         self.camera_observation = i3
         # #print(np.shape(np.array(self.camera_observation)))
         if  self.camera_observation is None:
