@@ -33,7 +33,7 @@ SHOW_LOCAL_VIEW= True
 SECONDS_PER_EP = 200
 SAMPLING_RESOLUTION = 1
 PARAM = [6.3, 2.875] # [ld: look ahead distance, wheel based] 
-REWARD_ARR = [-10, -1000, 100, 1000, -1200] # [normal, coll, back on global, time up]
+REWARD_ARR = [10, -1000, 100, 1000, -1200] # [normal, coll, back on global, time up]
 DT = 0.1 #Fixed time step
 
 START_END_DIC = {7:[8,9,15,16,19,20], 
@@ -57,8 +57,14 @@ Things to do:
 
 '''
 
+
+
+
 class CarENV(gym.Env):
-    
+
+
+
+
     def __init__(self, Vehicle_model = VEHICLE_MODEL, host = HOST, port = PORT,no_render_mode = NO_RENDER_MODE, time_out  = TIMEOUT, IMG_HEIGHT = IMG_HEIGHT , IMG_WIDTH =IMG_WIDTH, show_local_view = SHOW_LOCAL_VIEW, sampling_resolution = SAMPLING_RESOLUTION, model = PARAM, seconds_per_ep = SECONDS_PER_EP, reward_arr = REWARD_ARR, Debugger = True, start_end_dic = START_END_DIC, dt = DT, action_space_type = 'Discrete'):
         super().__init__()
         self.host = host
@@ -243,11 +249,11 @@ class CarENV(gym.Env):
         self.Camera_bp.set_attribute('fov', f"{FOV}")
         self.Camera_bp.set_attribute('sensor_tick', f'{self.dt}')
         
-        cam_transform = carla.Transform(self.vehicle.get_transform().transform(carla.Location(x=5,z=10)), carla.Rotation(yaw=90, pitch=-90))
+        cam_transform = carla.Transform(self.vehicle.get_transform().transform(carla.Location(x=7.5,y=-65,z=20)), carla.Rotation(yaw=90, pitch=-90))
         transform = carla.Transform(carla.Location(x = 2.5, z = 0.7), carla.Rotation(pitch = 0))
         
-
-        self.Camera  =self.world.try_spawn_actor(self.Camera_bp, cam_transform, attach_to= self.vehicle)
+        
+        self.Camera  =self.world.try_spawn_actor(self.Camera_bp, cam_transform)#, attach_to= self.vehicle)
         self.actor_lst.append(self.Camera)
         
         ###### Spawn Collision Sensor ######## 
@@ -659,12 +665,31 @@ class CarENV(gym.Env):
         ###### Projecting on the camera #########
         
         
-        inv_matrix = self.inverse_matrix
+        inv_matrix = self.inverse_matrix.view()
         image = self.data_dict['rgb_image']
         
-        bounding_box_set = self.world.get_level_bbs(carla.CityObjectLabel.Vehicles)
-        bounding_box_set.extend(self.world.get_level_bbs(carla.CityObjectLabel.Vehicles))
-    
+        # bounding_box_set = [self.vehicle.bounding_box]
+        # # bounding_box_set.extend(self.world.get_level_bbs(carla.CityObjectLabel.Vehicles))
+
+
+        # edges = [[0,1], [1,3], [3,2], [2,0], [0,4], [4,5], [5,1], [5,7], [7,6], [6,4], [6,2], [7,3]]
+
+
+            
+      
+        # for bb in bounding_box_set:
+        #     print(bb)
+        # # if forward_vec.x *ray.x+forward_vec.y *ray.y+forward_vec.z *ray.z > 1:
+        #     # Cycle through the vertices
+        #     verts = [v for v in bb.get_world_vertices(carla.Transform())]
+        #     print("the vert \n",verts)
+        #     for edge in edges:
+        #         # Join the vertices into edges
+        #         p1 = self.get_image_point(verts[edge[0]],  self.K,inv_matrix)
+        #         p2 = self.get_image_point(verts[edge[1]],  self.K,inv_matrix)
+  
+        #         # Draw the edges into the camera output
+        #         cv2.line(image, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), (0,0,255, 255), 3)
         for global_transform, _ in self.route:
             if global_transform == self.route[-1][0]:
                 g_p = self.get_image_point(global_transform.transform.location, self.K,inv_matrix)
@@ -674,10 +699,10 @@ class CarENV(gym.Env):
                 cv2.circle(image,(int(g_p[0]),int(g_p[1])),5,(0,0,255,255),2)    
             else:    
                 g_p = self.get_image_point(global_transform.transform.location, self.K, inv_matrix)
-                cv2.circle(image,(int(g_p[0]),int(g_p[1])),5,(255,0,0,255),2)
+                cv2.circle(image,(int(g_p[0]),int(g_p[1])),5,(0,0,0,255),2)
 
         g_p = self.get_image_point(self.vehicle.get_transform().location, self.K, inv_matrix)
-        cv2.circle(image,(int(g_p[0]),int(g_p[1])),5,(0,0,255,255),2)
+        cv2.circle(image,(int(g_p[0]),int(g_p[1])),10,(0,0,255,255),5)
 
         self.camera_observation = image[:,:,:3]
         # self.camera_observation = self.data_dict['rgb_image'][:,:,:3]
@@ -769,7 +794,8 @@ class CarENV(gym.Env):
 
 
     def img_2_video(self,image):
-            cv2.imwrite(f'images\image_{str(self.total_steps)}.jpg', image)
+            if self.SHOW_LOCAL_VIEW:
+                cv2.imwrite(f'images\image_{str(self.time_step)}.jpg', image)
     
     def get_image_point(self, loc, K, w2c):
             # Calculate 2D projection of 3D coordinate
@@ -801,7 +827,18 @@ class CarENV(gym.Env):
         return K
 
 
-    
+    def connect(self,Vehicle_model = VEHICLE_MODEL, host = HOST, port = PORT,no_render_mode = NO_RENDER_MODE, time_out  = TIMEOUT, IMG_HEIGHT = IMG_HEIGHT , IMG_WIDTH =IMG_WIDTH, show_local_view = SHOW_LOCAL_VIEW, sampling_resolution = SAMPLING_RESOLUTION, model = PARAM, seconds_per_ep = SECONDS_PER_EP, reward_arr = REWARD_ARR, Debugger = True, start_end_dic = START_END_DIC, dt = DT, action_space_type = 'Discrete'):
+        try: 
+            #print("Please wait as we attempt to connect to the CARLA server.")
+            self.client = carla.Client(host, port)        
+            self.client.set_timeout(time_out)
+            #print("You have successfully connected to the CARLA server.")
+        except:
+            raise Exception("Sorry you were unable to connect to the CARLA server. Check if you have a CARLA server running.")
+        self.world = self.client.get_world()
+        self.bp_lip = self.world.get_blueprint_library()
+        self.spawn_points = self.world.get_map().get_spawn_points() 
+        self.vehicle_model = self.bp_lip.filter(Vehicle_model)[0]    
 
     
 
